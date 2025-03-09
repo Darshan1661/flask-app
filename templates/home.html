@@ -1,0 +1,13 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Home</title>
+    <link rel="stylesheet" type="text/css" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <h2>Welcome, {{ username }}</h2>
+    <a href="{{ url_for('show_table') }}">View Table</a> |
+    <a href="{{ url_for('logout') }}">Logout</a> |
+    <a href="{{ url_for('export_to_excel') }}" download>Download Excel</a>
+</body>
+</html>
