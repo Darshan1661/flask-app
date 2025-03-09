@@ -150,7 +150,7 @@ def logout():
 
 # --- RUN APP ---
 if __name__ == "__main__":
-    debug_mode = os.getenv("DEBUG", "False").lower() == "true"
-    port = int(os.getenv("PORT", 10000))  # Get port from environment variable or default to 10000
-    app.run(host="0.0.0.0", port=port, debug=debug_mode)
+    port = int(os.environ.get("PORT", 10000))  # Use Render's port dynamically
+    app.run(host="0.0.0.0", port=port)
+
 
