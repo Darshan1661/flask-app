@@ -1,19 +1,29 @@
+import os
 from flask import Flask, render_template, request, redirect, url_for, session, jsonify, send_file
 import sqlite3
 import pandas as pd
-import os
 
 app = Flask(__name__)
-app.secret_key = "your_secret_key"
+
+# Load secret key from environment variable
+app.secret_key = os.getenv("SECRET_KEY", "default_secret_key")
 
 # --- DATABASE CONNECTION FUNCTION ---
 def connect_db():
-    return sqlite3.connect("database.db")
+    db_path = os.getenv("DATABASE_URL", "sqlite:///database.db")
+    try:
+        conn = sqlite3.connect(db_path.replace("sqlite:///", ""), check_same_thread=False)
+        return conn
+    except sqlite3.Error as e:
+        print(f"Database Connection Error: {e}")
+        return None
 
 # --- EXPORT TO EXCEL FUNCTION ---
 @app.route("/export")
 def export_to_excel():
     conn = connect_db()
+    if conn is None:
+        return "Database connection error", 500
     df = pd.read_sql_query("SELECT * FROM data", conn)
     conn.close()
     file_path = "data.xlsx"
@@ -29,6 +39,8 @@ def login():
         password = request.form["password"]
 
         conn = connect_db()
+        if conn is None:
+            return "Database connection error", 500
         cursor = conn.cursor()
         cursor.execute("SELECT * FROM users WHERE username=? AND password=?", (username, password))
         user = cursor.fetchone()
@@ -57,6 +69,8 @@ def show_table():
         return redirect(url_for("login"))
 
     conn = connect_db()
+    if conn is None:
+        return "Database connection error", 500
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
     cursor.execute("SELECT * FROM data")
@@ -80,9 +94,11 @@ def update_data():
         print(f"Received: UID={uid}, Date={date}, Value={value}")  # Debugging
 
         conn = connect_db()
+        if conn is None:
+            return jsonify({"status": "ERROR", "message": "Database connection error"}), 500
         cursor = conn.cursor()
 
-        # Check if UID exists and get the namen n
+        # Check if UID exists and get the name
         cursor.execute("SELECT name FROM data WHERE uid = ?", (uid,))
         result = cursor.fetchone()
 
@@ -112,6 +128,8 @@ def verify_uid():
         print(f"Received UID: {uid}")  # Debugging
 
         conn = connect_db()
+        if conn is None:
+            return jsonify({"status": "ERROR", "message": "Database connection error"}), 500
         cursor = conn.cursor()
         cursor.execute("SELECT name FROM data WHERE uid = ?", (uid,))
         user = cursor.fetchone()
@@ -132,4 +150,7 @@ def logout():
 
 # --- RUN APP ---
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000, debug=True)
+    debug_mode = os.getenv("DEBUG", "False").lower() == "true"
+    port = int(os.getenv("PORT", 10000))  # Get port from environment variable or default to 10000
+    app.run(host="0.0.0.0", port=port, debug=debug_mode)
+
