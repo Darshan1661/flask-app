@@ -5,29 +5,19 @@ import pandas as pd
 
 app = Flask(__name__)
 
-db_config = {
-    "dbname": "my_database",
-    "user": "postgres",
-    "password": "postgres",
-    "host": "localhost",  # or your PostgreSQL server IP
-    "port": "5432"  # Default PostgreSQL port
-}
-
-# Load secret key from environment variable
+# Load secret key from environment variables
 app.secret_key = os.getenv("SECRET_KEY", "default_secret_key")
 
-# --- DATABASE CONNECTION FUNCTION ---
+# Database connection function
 def connect_db():
     try:
-        conn = psycopg2.connect(
-            database=os.getenv("POSTGRES_DB", "my_database"),
-            user=os.getenv("POSTGRES_USER", "postgres"),
-            password=os.getenv("POSTGRES_PASSWORD", "postgres"),
-            host=os.getenv("POSTGRES_HOST", "localhost"),
-            port=os.getenv("POSTGRES_PORT", "5432"),
-        )
+        DATABASE_URL = os.getenv("DATABASE_URL")
+        if not DATABASE_URL:
+            raise ValueError("DATABASE_URL is not set in environment variables")
+        
+        conn = psycopg2.connect(DATABASE_URL, sslmode="require")
         return conn
-    except psycopg2.Error as e:
+    except Exception as e:
         print(f"Database Connection Error: {e}")
         return None
 
@@ -38,7 +28,7 @@ def export_to_excel():
     if conn is None:
         return "Database connection error", 500
     
-    df = pd.read_sql_query("SELECT * FROM data", conn)
+    df = pd.read_sql_query("SELECT * FROM data_table", conn)
     conn.close()
     
     file_path = "data.xlsx"
@@ -102,9 +92,8 @@ def show_table():
 
     return render_template("table.html", rows=data)
 
-
 # --- UPDATE DATABASE (ESP32 API) ---
-@app.route("/update", methods=["POST"])  # ✅ Ensure POST is allowed
+@app.route("/update", methods=["POST"])
 def update():
     try:
         data = request.get_json()
@@ -123,7 +112,10 @@ def update():
         print(f"UID: {uid}, Date: {date}, Value: {value}")  # Debugging
 
         # ✅ Connect to PostgreSQL
-        conn = psycopg2.connect(**db_config)
+        conn = connect_db()
+        if conn is None:
+            return jsonify({"status": "ERROR", "message": "Database connection error"}), 500
+        
         cur = conn.cursor()
 
         # ✅ Check if UID exists
@@ -134,7 +126,7 @@ def update():
             return jsonify({"status": "ERROR", "message": "UID not found"}), 400
 
         # ✅ Update the specific date column in the database
-        update_query = f"UPDATE data_table SET \"{date}\" = %s WHERE uid = %s"
+        update_query = f'UPDATE data_table SET "{date}" = %s WHERE uid = %s'
         cur.execute(update_query, (value, uid))
 
         conn.commit()
