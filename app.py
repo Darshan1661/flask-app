@@ -1,20 +1,33 @@
 import os
 from flask import Flask, render_template, request, redirect, url_for, session, jsonify, send_file
-import sqlite3
+import psycopg2
 import pandas as pd
 
 app = Flask(__name__)
+
+db_config = {
+    "dbname": "my_database",
+    "user": "postgres",
+    "password": "postgres",
+    "host": "localhost",  # or your PostgreSQL server IP
+    "port": "5432"  # Default PostgreSQL port
+}
 
 # Load secret key from environment variable
 app.secret_key = os.getenv("SECRET_KEY", "default_secret_key")
 
 # --- DATABASE CONNECTION FUNCTION ---
 def connect_db():
-    db_path = os.getenv("DATABASE_URL", "sqlite:///database.db")
     try:
-        conn = sqlite3.connect(db_path.replace("sqlite:///", ""), check_same_thread=False)
+        conn = psycopg2.connect(
+            database=os.getenv("POSTGRES_DB", "my_database"),
+            user=os.getenv("POSTGRES_USER", "postgres"),
+            password=os.getenv("POSTGRES_PASSWORD", "postgres"),
+            host=os.getenv("POSTGRES_HOST", "localhost"),
+            port=os.getenv("POSTGRES_PORT", "5432"),
+        )
         return conn
-    except sqlite3.Error as e:
+    except psycopg2.Error as e:
         print(f"Database Connection Error: {e}")
         return None
 
@@ -24,8 +37,10 @@ def export_to_excel():
     conn = connect_db()
     if conn is None:
         return "Database connection error", 500
+    
     df = pd.read_sql_query("SELECT * FROM data", conn)
     conn.close()
+    
     file_path = "data.xlsx"
     df.to_excel(file_path, index=False)
     return send_file(file_path, as_attachment=True)
@@ -42,7 +57,7 @@ def login():
         if conn is None:
             return "Database connection error", 500
         cursor = conn.cursor()
-        cursor.execute("SELECT * FROM users WHERE username=? AND password=?", (username, password))
+        cursor.execute("SELECT * FROM users WHERE username=%s AND password=%s", (username, password))
         user = cursor.fetchone()
         conn.close()
 
@@ -71,76 +86,94 @@ def show_table():
     conn = connect_db()
     if conn is None:
         return "Database connection error", 500
-    conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
-    cursor.execute("SELECT * FROM data")
+
+    # Execute query
+    cursor.execute("SELECT * FROM data_table")  
     rows = cursor.fetchall()
+
+    # Get column names
+    column_names = [desc[0] for desc in cursor.description]
+
     conn.close()
 
-    return render_template("table.html", rows=rows)
+    # Convert tuples to dictionaries
+    data = [dict(zip(column_names, row)) for row in rows]
+
+    return render_template("table.html", rows=data)
+
 
 # --- UPDATE DATABASE (ESP32 API) ---
-@app.route("/update", methods=["POST"])
-def update_data():
+@app.route("/update", methods=["POST"])  # ✅ Ensure POST is allowed
+def update():
     try:
         data = request.get_json()
-        uid = data.get("UID")
-        date = data.get("date")
-        value = data.get("value")
+        print("Received JSON:", data)  # Debugging
 
-        if not uid or not date or value is None:
-            return jsonify({"status": "ERROR", "message": "Missing data"}), 400
+        if not data:
+            return jsonify({"status": "ERROR", "message": "No JSON received"}), 400
+        
+        if "UID" not in data or "date" not in data or "value" not in data:
+            return jsonify({"status": "ERROR", "message": "Missing required fields"}), 400
 
-        print(f"Received: UID={uid}, Date={date}, Value={value}")  # Debugging
+        uid = data["UID"]
+        date = data["date"]
+        value = data["value"]
 
-        conn = connect_db()
-        if conn is None:
-            return jsonify({"status": "ERROR", "message": "Database connection error"}), 500
-        cursor = conn.cursor()
+        print(f"UID: {uid}, Date: {date}, Value: {value}")  # Debugging
 
-        # Check if UID exists and get the name
-        cursor.execute("SELECT name FROM data WHERE uid = ?", (uid,))
-        result = cursor.fetchone()
+        # ✅ Connect to PostgreSQL
+        conn = psycopg2.connect(**db_config)
+        cur = conn.cursor()
 
-        if result:
-            name = result[0]
-            try:
-                cursor.execute(f"UPDATE data SET `{date}` = ? WHERE uid = ?", (int(value), uid))
-                conn.commit()
-            except sqlite3.OperationalError:
-                conn.close()
-                return jsonify({"status": "ERROR", "message": f"Date column '{date}' not found"}), 400
+        # ✅ Check if UID exists
+        cur.execute("SELECT * FROM data_table WHERE uid = %s", (uid,))
+        existing_record = cur.fetchone()
 
-            conn.close()
-            return jsonify({"status": "VERIFIED", "name": name}), 200
-        else:
-            conn.close()
-            return jsonify({"status": "NOT_FOUND"}), 404
+        if not existing_record:
+            return jsonify({"status": "ERROR", "message": "UID not found"}), 400
+
+        # ✅ Update the specific date column in the database
+        update_query = f"UPDATE data_table SET \"{date}\" = %s WHERE uid = %s"
+        cur.execute(update_query, (value, uid))
+
+        conn.commit()
+        cur.close()
+        conn.close()
+
+        return jsonify({"status": "OK", "message": "Data updated successfully"}), 200
+
     except Exception as e:
-        return jsonify({"status": "ERROR", "message": str(e)}), 400
-
+        print("Exception:", str(e))  # Debugging
+        return jsonify({"status": "ERROR", "message": str(e)}), 500
+    
 # --- VERIFY UID FUNCTION ---
 @app.route("/verify", methods=["POST"])
 def verify_uid():
     try:
         data = request.get_json()
+
+        if not data or "UID" not in data:
+            return jsonify({"status": "ERROR", "message": "Invalid or missing JSON"}), 400
+        
         uid = data.get("UID")
         print(f"Received UID: {uid}")  # Debugging
 
         conn = connect_db()
         if conn is None:
             return jsonify({"status": "ERROR", "message": "Database connection error"}), 500
+        
         cursor = conn.cursor()
-        cursor.execute("SELECT name FROM data WHERE uid = ?", (uid,))
+        cursor.execute("SELECT name FROM data_table WHERE uid = %s", (uid,))
         user = cursor.fetchone()
         conn.close()
 
         if user:
-            return jsonify({"status": "VERIFIED", "name": user[0]})
+            return jsonify({"status": "VERIFIED", "name": user[0]}), 200
         else:
             return jsonify({"status": "NOT_FOUND"}), 404
     except Exception as e:
-        return jsonify({"status": "ERROR", "message": str(e)}), 400
+        return jsonify({"status": "ERROR", "message": str(e)}), 500
 
 # --- LOGOUT FUNCTION ---
 @app.route("/logout")
@@ -152,5 +185,3 @@ def logout():
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))  # Use Render's port dynamically
     app.run(host="0.0.0.0", port=port)
-
-
