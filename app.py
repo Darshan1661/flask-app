@@ -6,12 +6,17 @@ import pandas as pd
 app = Flask(__name__)
 
 # --- Database Configuration ---
-DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://postgres:darshan@localhost:5432/mydatabase")
+DATABASE_URL = os.getenv("DATABASE_URL")
 
 # --- Flask Secret Key ---
 app.secret_key = "default_secret_key"
 def connect_db():
-    return psycopg2.connect(DATABASE_URL)
+    try:
+        print("Connecting to database:", DATABASE_URL)  # Debugging
+        return psycopg2.connect(DATABASE_URL)
+    except Exception as e:
+        print("Database connection error:", str(e))
+        return None
 
 # --- EXPORT TO EXCEL FUNCTION ---
 @app.route("/export")
