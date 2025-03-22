@@ -6,7 +6,7 @@ import pandas as pd
 app = Flask(__name__)
 
 # --- Database Configuration ---
-DATABASE_URL = os.getenv("DATABASE_URL")
+DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://postgres:darshan@localhost:5432/mydatabase")
 
 # --- Flask Secret Key ---
 app.secret_key = "default_secret_key"
