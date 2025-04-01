@@ -6,17 +6,33 @@ import pandas as pd
 app = Flask(__name__)
 
 # --- Database Configuration ---
-DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://postgres:darshan@localhost:5432/mydatabase")
+DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://mydb_bo4h_user:62G78IsSH8APj0GSXgDe8FvhGuTrHfY0@dpg-cvj8hlemcj7s73e9oni0-a.oregon-postgres.render.com/mydb_bo4h?sslmode=require")
 
 # --- Flask Secret Key ---
-app.secret_key = "default_secret_key"
+app.secret_key = os.getenv("FLASK_SECRET_KEY", "your-secret-key-here")
+
+# -- Connect to Database --
 def connect_db():
     try:
-        print("Connecting to database:", DATABASE_URL)  # Debugging
-        return psycopg2.connect(DATABASE_URL)
+        return psycopg2.connect(DATABASE_URL, sslmode='require')
     except Exception as e:
-        print("Database connection error:", str(e))
         return None
+
+conn = connect_db()
+if conn:
+    with conn.cursor() as cursor:
+        username = "admin"
+        raw_password = "admin123"  # Store as plain text
+
+        # Check if user already exists
+        cursor.execute("SELECT username FROM users WHERE username = %s", (username,))
+        existing_user = cursor.fetchone()
+
+        if not existing_user:
+            cursor.execute("INSERT INTO users (username, password) VALUES (%s, %s)", 
+                           (username, raw_password))  # Save as plain text
+            conn.commit()
+    conn.close()
 
 # --- EXPORT TO EXCEL FUNCTION ---
 @app.route("/export")
@@ -25,14 +41,15 @@ def export_to_excel():
     if conn is None:
         return "Database connection error", 500
     
-    df = pd.read_sql_query("SELECT * FROM data", conn)
-    conn.close()
-    
-    file_path = "data.xlsx"
-    df.to_excel(file_path, index=False)
-    return send_file(file_path, as_attachment=True)
-
-# --- LOGIN PAGE ---
+    try:
+        df = pd.read_sql_query("SELECT * FROM records_2025_03", conn)
+        file_path = "data.xlsx"
+        df.to_excel(file_path, index=False)
+        return send_file(file_path, as_attachment=True)
+    finally:
+        conn.close()
+        
+# --- LOGIN FUNCTION ---
 @app.route("/", methods=["GET", "POST"])
 @app.route("/login", methods=["GET", "POST"])
 def login():
@@ -43,20 +60,21 @@ def login():
         conn = connect_db()
         if conn is None:
             return "Database connection error", 500
-        cursor = conn.cursor()
-        cursor.execute("SELECT * FROM users WHERE username=%s AND password=%s", (username, password))
-        user = cursor.fetchone()
-        conn.close()
-
-        if user:
-            session["user"] = username
-            return redirect(url_for("home"))
-        else:
-            return "Invalid credentials! Try again."
-
+            
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute("SELECT password FROM users WHERE username = %s", (username,))
+                result = cursor.fetchone()
+                
+                if result and result[0] == password:
+                    session["user"] = username
+                    return redirect(url_for("home"))
+                return render_template("login.html", error="Invalid credentials! Try again.")
+        finally:
+            conn.close()
     return render_template("login.html")
 
-# --- HOME PAGE ---
+# --- HOME ---
 @app.route("/home")
 def home():
     if "user" in session:
@@ -74,12 +92,9 @@ def show_table():
         return "Database connection error", 500
 
     cursor = conn.cursor()
-
-    # Change "your_actual_table_name" to the correct table name
     cursor.execute("SELECT * FROM records_2025_03")  
     rows = cursor.fetchall()
     column_names = [desc[0] for desc in cursor.description]
-
     conn.close()
 
     data = [dict(zip(column_names, row)) for row in rows]
@@ -90,64 +105,51 @@ def show_table():
 def update():
     try:
         data = request.get_json()
-        if not data:
-            return jsonify({"status": "ERROR", "message": "No JSON received"}), 400
-        
-        uid = data.get("UID")
-        date = data.get("date")
-        value = data.get("value")
+        print("Received JSON:", data)  # Debugging print
+        if not data or not all(field in data for field in ["UID", "date", "value"]):
+            return jsonify({"status": "ERROR", "message": "Invalid JSON or missing fields"}), 400
 
-        if not uid or not date or not value:
-            return jsonify({"status": "ERROR", "message": "Missing required fields"}), 400
-
+        uid, date, value = data["UID"], data["date"], data["value"]
         conn = connect_db()
         if conn is None:
             return jsonify({"status": "ERROR", "message": "Database connection error"}), 500
         
-        cur = conn.cursor()
-        cur.execute("SELECT * FROM data_table WHERE uid = %s", (uid,))
-        existing_record = cur.fetchone()
-
-        if not existing_record:
-            return jsonify({"status": "ERROR", "message": "UID not found"}), 400
-
-        update_query = f"UPDATE data_table SET \"{date}\" = %s WHERE uid = %s"
-        cur.execute(update_query, (value, uid))
-
-        conn.commit()
-        cur.close()
-        conn.close()
-
-        return jsonify({"status": "OK", "message": "Data updated successfully"}), 200
-
+        try:
+            with conn.cursor() as cur:
+                cur.execute(f"""
+                    UPDATE records_2025_03 
+                    SET {date} = %s 
+                    WHERE uid = %s
+                """, (value, uid))
+                conn.commit()
+            return jsonify({"status": "OK", "message": "Data updated successfully"}), 200
+        finally:
+            conn.close()
     except Exception as e:
         return jsonify({"status": "ERROR", "message": str(e)}), 500
 
 # --- VERIFY UID FUNCTION ---
-@app.route("/verify", methods=["POST"])
+@app.route("/verify", methods=["POST", "GET"])  # Allow both POST and GET  
 def verify_uid():
     try:
         data = request.get_json()
         if not data or "UID" not in data:
             return jsonify({"status": "ERROR", "message": "Invalid or missing JSON"}), 400
         
-        uid = data.get("UID")
-
+        uid = data["UID"]
         conn = connect_db()
         if conn is None:
             return jsonify({"status": "ERROR", "message": "Database connection error"}), 500
         
         cursor = conn.cursor()
-        cursor.execute("SELECT name FROM data_table WHERE uid = %s", (uid,))
+        cursor.execute("SELECT name FROM records_2025_03 WHERE uid = %s", (uid,))
         user = cursor.fetchone()
         conn.close()
 
-        if user:
-            return jsonify({"status": "VERIFIED", "name": user[0]}), 200
-        return jsonify({"status": "NOT_FOUND"}), 404
-
+        return jsonify({"status": "VERIFIED", "name": user[0] if user else "Unknown"}), 200 if user else 404
     except Exception as e:
         return jsonify({"status": "ERROR", "message": str(e)}), 500
+
 
 # --- LOGOUT FUNCTION ---
 @app.route("/logout")
@@ -158,4 +160,5 @@ def logout():
 # --- RUN APP ---
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
-    app.run(host="0.0.0.0", port=port)
+app.run(host="0.0.0.0", port=10000, debug=True)
+
