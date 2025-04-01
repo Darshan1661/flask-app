@@ -9,7 +9,7 @@ app = Flask(__name__)
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://mydb_bo4h_user:62G78IsSH8APj0GSXgDe8FvhGuTrHfY0@dpg-cvj8hlemcj7s73e9oni0-a.oregon-postgres.render.com/mydb_bo4h?sslmode=require")
 
 # --- Flask Secret Key ---
-app.secret_key = os.getenv("FLASK_SECRET_KEY", "your-secret-key-here")
+app.secret_key = os.getenv("FLASK_SECRET_KEY", "a3f1c9b8d7e6f5a4b3c2d1e0f9e8d7c6a5b4c3d2e1f0a9b8c7d6e5f4a3b2c1")
 
 # -- Connect to Database --
 def connect_db():
