@@ -23,16 +23,18 @@ if conn:
     with conn.cursor() as cursor:
         username = "admin"
         raw_password = "admin123"  # Store as plain text
+        table_name = "records_" + username  # Generate table name dynamically
 
         # Check if user already exists
         cursor.execute("SELECT username FROM users WHERE username = %s", (username,))
         existing_user = cursor.fetchone()
 
         if not existing_user:
-            cursor.execute("INSERT INTO users (username, password) VALUES (%s, %s)", 
-                           (username, raw_password))  # Save as plain text
+            cursor.execute("INSERT INTO users (username, password, table_name) VALUES (%s, %s, %s)", 
+                           (username, raw_password, table_name))  # ✅ CORRECT! Now includes table_name
             conn.commit()
     conn.close()
+
 
 # --- EXPORT TO EXCEL FUNCTION ---
 @app.route("/export")
@@ -63,16 +65,20 @@ def login():
             
         try:
             with conn.cursor() as cursor:
-                cursor.execute("SELECT password FROM users WHERE username = %s", (username,))
+                # Fetch password and table_name from the users table
+                cursor.execute("SELECT password, table_name FROM users WHERE username = %s", (username,))
                 result = cursor.fetchone()
                 
                 if result and result[0] == password:
                     session["user"] = username
+                    session["table_name"] = result[1]  # Store the table name in the session
                     return redirect(url_for("home"))
+
                 return render_template("login.html", error="Invalid credentials! Try again.")
         finally:
             conn.close()
     return render_template("login.html")
+
 
 # --- HOME ---
 @app.route("/home")
@@ -84,21 +90,27 @@ def home():
 # --- DISPLAY TABLE PAGE ---
 @app.route("/table")
 def show_table():
-    if "user" not in session:
+    if "user" not in session or "table_name" not in session:
         return redirect(url_for("login"))
 
     conn = connect_db()
     if conn is None:
         return "Database connection error", 500
 
+    table_name = session["table_name"]  # Get the user's table name from the session
     cursor = conn.cursor()
-    cursor.execute("SELECT * FROM records_2025_03")  
+    
+    # Use parameterized query to prevent SQL injection
+    query = f"SELECT * FROM {table_name}"
+    cursor.execute(query)  
+
     rows = cursor.fetchall()
     column_names = [desc[0] for desc in cursor.description]
     conn.close()
 
     data = [dict(zip(column_names, row)) for row in rows]
     return render_template("table.html", rows=data)
+
 
 # --- UPDATE DATABASE (ESP32 API) ---
 @app.route("/update", methods=["POST"])
