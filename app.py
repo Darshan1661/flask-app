@@ -47,6 +47,23 @@ def export_to_excel():
     finally:
         conn.close()
 
+# --- Validate API Key and Get Table Name ---
+def get_table_name(api_key):
+    conn = connect_db()
+    if conn is None:
+        return None, "Database connection error"
+
+    cursor = conn.cursor()
+    cursor.execute("SELECT table_name FROM customers WHERE api_key = %s", (api_key,))
+    result = cursor.fetchone()
+    conn.close()
+
+    if result:
+        return result[0], None  # ✅ Return table_name if API key is valid
+    else:
+        return None, "Invalid API Key"  # ❌ Return error if API key is invalid
+
+
 # --- LOGIN FUNCTION ---
 @app.route("/", methods=["GET", "POST"])
 @app.route("/login", methods=["GET", "POST"])
@@ -60,15 +77,16 @@ def login():
             return "Database connection error", 500
 
         try:
-            with conn.cursor() as cursor:
-                cursor.execute("SELECT password FROM users WHERE username = %s", (username,))
-                result = cursor.fetchone()
+            cursor = conn.cursor()
+            cursor.execute("SELECT password, table_name FROM customers WHERE username = %s", (username,))
+            result = cursor.fetchone()
 
-                if result and result[0] == password:
-                    session["user"] = username
-                    return redirect(url_for("home"))
+            if result and result[0] == password:
+                session["user"] = username
+                session["table_name"] = result[1]  # Store user's table name
+                return redirect(url_for("home"))
 
-                return render_template("login.html", error="Invalid credentials! Try again.")
+            return render_template("login.html", error="Invalid credentials! Try again.")
         finally:
             conn.close()
     return render_template("login.html")
@@ -86,12 +104,16 @@ def show_table():
     if "user" not in session:
         return redirect(url_for("login"))
 
+    table_name = session.get("table_name")
+    if not table_name:
+        return "User not linked to a table", 500
+
     conn = connect_db()
     if conn is None:
         return "Database connection error", 500
 
     cursor = conn.cursor()
-    cursor.execute("SELECT * FROM records_darshan")
+    cursor.execute(f'SELECT * FROM "{table_name}"')
     rows = cursor.fetchall()
     column_names = [desc[0] for desc in cursor.description]
     conn.close()
@@ -99,13 +121,18 @@ def show_table():
     data = [dict(zip(column_names, row)) for row in rows]
     return render_template("table.html", rows=data)
 
-# --- update ---
+# --- UPDATE FUNCTION (REQUIRES API KEY) ---
 @app.route('/update', methods=['POST'])
 def update_data():
     data = request.get_json()
+    api_key = request.headers.get("api_key")
 
     if not data or "UID" not in data or "date" not in data or "value" not in data:
         return jsonify({"status": "ERROR", "message": "Invalid request data"}), 400
+
+    table_name, error = get_table_name(api_key)
+    if error:
+        return jsonify({"status": "ERROR", "message": error}), 401
 
     uid = data["UID"]
     date = data["date"]  # Example: "03-03-2025"
@@ -117,8 +144,7 @@ def update_data():
 
     cursor = conn.cursor()
     try:
-        # Use double quotes around the column name
-        cursor.execute(f'UPDATE records_darshan SET "{date}" = %s WHERE uid = %s', (value, uid))
+        cursor.execute(f'UPDATE "{table_name}" SET "{date}" = %s WHERE uid = %s', (value, uid))
         conn.commit()
     except Exception as e:
         conn.close()
@@ -128,26 +154,28 @@ def update_data():
     return jsonify({"status": "SUCCESS", "message": "Data updated successfully"}), 200
 
 
-# --- VERIFY UID FUNCTION (NO AUTH TOKEN) ---
+# --- VERIFY UID FUNCTION (REQUIRES API KEY) ---
 @app.route('/verify', methods=['POST'])
 def verify_uid():
-    # Get JSON data
     data = request.get_json()
+    api_key = request.headers.get("api_key")
 
-    # Validate request body
     if not data or "UID" not in data:
         return jsonify({"status": "ERROR", "message": "Invalid or missing UID"}), 400
 
+    table_name, error = get_table_name(api_key)
+    if error:
+        return jsonify({"status": "ERROR", "message": error}), 401
+
     uid = data["UID"]
 
-    # Connect to database
     conn = connect_db()
     if conn is None:
         return jsonify({"status": "ERROR", "message": "Database connection error"}), 500
 
     cursor = conn.cursor()
     try:
-        cursor.execute("SELECT name FROM records_darshan WHERE uid = %s", (uid,))
+        cursor.execute(f'SELECT name FROM "{table_name}" WHERE uid = %s', (uid,))
         user = cursor.fetchone()
     except Exception as e:
         conn.close()
@@ -159,6 +187,7 @@ def verify_uid():
         return jsonify({"status": "VERIFIED", "UID": uid, "name": user[0]}), 200
     else:
         return jsonify({"status": "NOT_FOUND", "message": "UID not found"}), 404
+
 
 # --- LOGOUT FUNCTION ---
 @app.route("/logout")
