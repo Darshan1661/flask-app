@@ -42,11 +42,21 @@ def export_to_excel():
     try:
         table_name = session["table_name"]
         df = pd.read_sql_query(f'SELECT * FROM "{table_name}"', conn)
-        file_path = f"{table_name}_data.xlsx"
-        df.to_excel(file_path, index=False)
-        return send_file(file_path, as_attachment=True)
+
+        output = BytesIO()
+        with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+            df.to_excel(writer, index=False, sheet_name='Sheet1')
+        output.seek(0)
+
+        return send_file(
+            output,
+            mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            as_attachment=True,
+            download_name=f"{table_name}_data.xlsx"
+        )
     finally:
         conn.close()
+
 
 # --- LOGIN FUNCTION ---
 @app.route("/", methods=["GET", "POST"])
