@@ -1,18 +1,24 @@
-# Python cache files
+# Python cache
 __pycache__/
-*.pyc
+*.py[cod]
+*.pyo
+*.pyd
 
-# Environment files
+# Environment variables
 .env
-data.xlsx
+*.env
 
-# IDE/Editor files
-.vscode/
-.idea/
+# Flask sessions
+flask_sessions/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Jupyter and notebooks
+.ipynb_checkpoints/
 
 # Virtual environment
 venv/
-
-# System files
-.DS_Store
-Thumbs.db
+.env/
+ENV/

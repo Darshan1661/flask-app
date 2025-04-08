@@ -3,18 +3,13 @@ from flask import Flask, render_template, request, redirect, url_for, jsonify, s
 import psycopg2
 import pandas as pd
 from flask_session import Session
+from io import BytesIO  # Missing import for Excel export
 from twilio.rest import Client
-from io import BytesIO
 
 app = Flask(__name__)
 
 # --- Flask Secret Key ---
 app.secret_key = os.getenv("FLASK_SECRET_KEY", "your_secret_key_here")
-
-account_sid = os.getenv("TWILIO_ACCOUNT_SID")
-auth_token = os.getenv("TWILIO_AUTH_TOKEN")
-TWILIO_FROM = 'whatsapp:+14155238886'
-SHOP_NAME = 'Darshan Store'  # You can customize this
 
 # --- Configure Server-side Session ---
 app.config["SESSION_TYPE"] = "filesystem"
@@ -36,7 +31,7 @@ def connect_db():
         print(f"Database connection failed: {e}")
         return None
 
-# --- EXPORT TO EXCEL FUNCTION ---
+# --- EXPORT DATA TO EXCEL ---
 @app.route("/export")
 def export_to_excel():
     if "table_name" not in session:
@@ -64,8 +59,7 @@ def export_to_excel():
     finally:
         conn.close()
 
-
-# --- LOGIN FUNCTION ---
+# --- LOGIN PAGE ---
 @app.route("/", methods=["GET", "POST"])
 @app.route("/login", methods=["GET", "POST"])
 def login():
@@ -88,17 +82,18 @@ def login():
                     session["api_key"] = result[2]
                     return redirect(url_for("home"))
 
-                return render_template("login.html", error="Invalid credentials! Try again.")
+                return render_template("login.html", error="Invalid credentials!")
         finally:
             conn.close()
+
     return render_template("login.html")
 
 # --- HOME PAGE ---
 @app.route("/home")
 def home():
-    if "user" in session:
-        return render_template("home.html", username=session["user"])
-    return redirect(url_for("login"))
+    if "user" not in session:
+        return redirect(url_for("login"))
+    return render_template("home.html", username=session["user"])
 
 # --- DISPLAY TABLE PAGE ---
 @app.route("/table")
@@ -110,116 +105,87 @@ def show_table():
     if conn is None:
         return "Database connection error", 500
 
-    cursor = conn.cursor()
-    table_name = session["table_name"]
-    cursor.execute(f'SELECT * FROM "{table_name}"')
-    rows = cursor.fetchall()
-    column_names = [desc[0] for desc in cursor.description]
-    conn.close()
+    try:
+        cursor = conn.cursor()
+        table_name = session["table_name"]
+        cursor.execute(f'SELECT * FROM "{table_name}"')
+        rows = cursor.fetchall()
+        column_names = [desc[0] for desc in cursor.description]
+    finally:
+        conn.close()
 
     data = [dict(zip(column_names, row)) for row in rows]
     return render_template("table.html", rows=data)
 
-# --- UPDATE FUNCTION (API KEY AUTHORIZATION) ---
+# --- UPDATE DATA USING API KEY ---
 @app.route('/update', methods=['POST'])
 def update_data():
     api_key = request.headers.get("x-api-key")
     if not api_key:
         return jsonify({"status": "ERROR", "message": "API key missing"}), 401
 
-    conn = connect_db()
-    if conn is None:
-        return jsonify({"status": "ERROR", "message": "Database connection error"}), 500
-
-    cursor = conn.cursor()
-    cursor.execute("SELECT table_name FROM customers WHERE api_key = %s", (api_key,))
-    result = cursor.fetchone()
-
-    if not result:
-        conn.close()
-        return jsonify({"status": "ERROR", "message": "Invalid API Key"}), 403
-
-    table_name = result[0]
-
     data = request.get_json()
     if not data or "UID" not in data or "date" not in data or "value" not in data:
-        conn.close()
         return jsonify({"status": "ERROR", "message": "Invalid request data"}), 400
 
     uid = data["UID"]
     date = data["date"]
     value = data["value"]
 
-    try:
-        # Update the database
-        cursor.execute(f'UPDATE "{table_name}" SET "{date}" = %s WHERE uid = %s', (value, uid))
-        conn.commit()
+    conn = connect_db()
+    if conn is None:
+        return jsonify({"status": "ERROR", "message": "Database connection error"}), 500
 
-        # Fetch name and phone number to send WhatsApp
-        cursor.execute(f'SELECT name, phone FROM "{table_name}" WHERE uid = %s', (uid,))
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT table_name FROM customers WHERE api_key = %s", (api_key,))
         result = cursor.fetchone()
 
-        if result:
-            name, phone = result
-            if phone:
-                message_body = f"📦 Hello {name}, your order of ₹{value} was placed on {date} at {SHOP_NAME}."
-                try:
-                    client = Client(TWILIO_SID, TWILIO_AUTH)
-                    message = client.messages.create(
-                        from_=TWILIO_FROM,
-                        to=f'whatsapp:{phone}',
-                        body=message_body
-                    )
-                    print("WhatsApp sent:", message.sid)
-                except Exception as twilio_error:
-                    print("WhatsApp send failed:", twilio_error)
-        else:
-            print("No name/phone found for UID:", uid)
+        if not result:
+            return jsonify({"status": "ERROR", "message": "Invalid API Key"}), 403
 
+        table_name = result[0]
+        cursor.execute(f'UPDATE "{table_name}" SET "{date}" = %s WHERE uid = %s', (value, uid))
+        conn.commit()
     except Exception as e:
-        conn.close()
         return jsonify({"status": "ERROR", "message": f"Database error: {e}"}), 500
+    finally:
+        conn.close()
 
-    conn.close()
-    return jsonify({"status": "SUCCESS", "message": "Data updated and WhatsApp sent"}), 200
+    return jsonify({"status": "SUCCESS", "message": "Data updated successfully"}), 200
 
-
-# --- VERIFY UID FUNCTION (WITH API KEY) ---
+# --- VERIFY UID USING API KEY ---
 @app.route('/verify', methods=['POST'])
 def verify_uid():
     api_key = request.headers.get("x-api-key")
     if not api_key:
         return jsonify({"status": "ERROR", "message": "API key missing"}), 401
 
-    conn = connect_db()
-    if conn is None:
-        return jsonify({"status": "ERROR", "message": "Database connection error"}), 500
-
-    cursor = conn.cursor()
-    cursor.execute("SELECT table_name FROM customers WHERE api_key = %s", (api_key,))
-    result = cursor.fetchone()
-
-    if not result:
-        conn.close()
-        return jsonify({"status": "ERROR", "message": "Invalid API Key"}), 403
-
-    table_name = result[0]
-
     data = request.get_json()
     if not data or "UID" not in data:
-        conn.close()
         return jsonify({"status": "ERROR", "message": "Invalid or missing UID"}), 400
 
     uid = data["UID"]
 
+    conn = connect_db()
+    if conn is None:
+        return jsonify({"status": "ERROR", "message": "Database connection error"}), 500
+
     try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT table_name FROM customers WHERE api_key = %s", (api_key,))
+        result = cursor.fetchone()
+
+        if not result:
+            return jsonify({"status": "ERROR", "message": "Invalid API Key"}), 403
+
+        table_name = result[0]
         cursor.execute(f'SELECT name FROM "{table_name}" WHERE uid = %s', (uid,))
         user = cursor.fetchone()
     except Exception as e:
-        conn.close()
         return jsonify({"status": "ERROR", "message": f"Database error: {e}"}), 500
-
-    conn.close()
+    finally:
+        conn.close()
 
     if user:
         return jsonify({"status": "VERIFIED", "UID": uid, "name": user[0]}), 200
@@ -232,8 +198,7 @@ def logout():
     session.clear()
     return redirect(url_for("login"))
 
-# --- RUN APP ---
+# --- RUN FLASK APP ---
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))  # Use Render's port or fallback
+    port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
-
