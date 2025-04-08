@@ -3,11 +3,18 @@ from flask import Flask, render_template, request, redirect, url_for, jsonify, s
 import psycopg2
 import pandas as pd
 from flask_session import Session
+from twilio.rest import Client
+from io import BytesIO
 
 app = Flask(__name__)
 
 # --- Flask Secret Key ---
 app.secret_key = os.getenv("FLASK_SECRET_KEY", "your_secret_key_here")
+
+TWILIO_SID = 'AC43cf8ea294c00af0c1158cf673f11b71'
+TWILIO_AUTH = '5777922efcc118b93e7944ba57a9394c'
+TWILIO_FROM = 'whatsapp:+14155238886'
+SHOP_NAME = 'Darshan Store'  # You can customize this
 
 # --- Configure Server-side Session ---
 app.config["SESSION_TYPE"] = "filesystem"
@@ -144,14 +151,38 @@ def update_data():
     value = data["value"]
 
     try:
+        # Update the database
         cursor.execute(f'UPDATE "{table_name}" SET "{date}" = %s WHERE uid = %s', (value, uid))
         conn.commit()
+
+        # Fetch name and phone number to send WhatsApp
+        cursor.execute(f'SELECT name, phone FROM "{table_name}" WHERE uid = %s', (uid,))
+        result = cursor.fetchone()
+
+        if result:
+            name, phone = result
+            if phone:
+                message_body = f"📦 Hello {name}, your order of ₹{value} was placed on {date} at {SHOP_NAME}."
+                try:
+                    client = Client(TWILIO_SID, TWILIO_AUTH)
+                    message = client.messages.create(
+                        from_=TWILIO_FROM,
+                        to=f'whatsapp:{phone}',
+                        body=message_body
+                    )
+                    print("WhatsApp sent:", message.sid)
+                except Exception as twilio_error:
+                    print("WhatsApp send failed:", twilio_error)
+        else:
+            print("No name/phone found for UID:", uid)
+
     except Exception as e:
         conn.close()
         return jsonify({"status": "ERROR", "message": f"Database error: {e}"}), 500
 
     conn.close()
-    return jsonify({"status": "SUCCESS", "message": "Data updated successfully"}), 200
+    return jsonify({"status": "SUCCESS", "message": "Data updated and WhatsApp sent"}), 200
+
 
 # --- VERIFY UID FUNCTION (WITH API KEY) ---
 @app.route('/verify', methods=['POST'])
