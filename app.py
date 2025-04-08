@@ -11,8 +11,8 @@ app = Flask(__name__)
 # --- Flask Secret Key ---
 app.secret_key = os.getenv("FLASK_SECRET_KEY", "your_secret_key_here")
 
-TWILIO_SID = 'AC43cf8ea294c00af0c1158cf673f11b71'
-TWILIO_AUTH = '5777922efcc118b93e7944ba57a9394c'
+account_sid = os.getenv("TWILIO_ACCOUNT_SID")
+auth_token = os.getenv("TWILIO_AUTH_TOKEN")
 TWILIO_FROM = 'whatsapp:+14155238886'
 SHOP_NAME = 'Darshan Store'  # You can customize this
 
