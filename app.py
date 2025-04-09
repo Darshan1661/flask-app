@@ -3,7 +3,7 @@ from flask import Flask, render_template, request, redirect, url_for, jsonify, s
 import psycopg2
 import pandas as pd
 from flask_session import Session
-from io import BytesIO  # Missing import for Excel export
+from io import BytesIO  # For Excel export
 from twilio.rest import Client
 
 app = Flask(__name__)
@@ -124,35 +124,72 @@ def update_data():
     if not api_key:
         return jsonify({"status": "ERROR", "message": "API key missing"}), 401
 
+    conn = connect_db()
+    if conn is None:
+        return jsonify({"status": "ERROR", "message": "Database connection error"}), 500
+
+    cursor = conn.cursor()
+    cursor.execute("SELECT table_name FROM customers WHERE api_key = %s", (api_key,))
+    result = cursor.fetchone()
+
+    if not result:
+        conn.close()
+        return jsonify({"status": "ERROR", "message": "Invalid API Key"}), 403
+
+    table_name = result[0]
     data = request.get_json()
     if not data or "UID" not in data or "date" not in data or "value" not in data:
+        conn.close()
         return jsonify({"status": "ERROR", "message": "Invalid request data"}), 400
 
     uid = data["UID"]
     date = data["date"]
     value = data["value"]
 
-    conn = connect_db()
-    if conn is None:
-        return jsonify({"status": "ERROR", "message": "Database connection error"}), 500
-
     try:
-        cursor = conn.cursor()
-        cursor.execute("SELECT table_name FROM customers WHERE api_key = %s", (api_key,))
-        result = cursor.fetchone()
-
-        if not result:
-            return jsonify({"status": "ERROR", "message": "Invalid API Key"}), 403
-
-        table_name = result[0]
         cursor.execute(f'UPDATE "{table_name}" SET "{date}" = %s WHERE uid = %s', (value, uid))
         conn.commit()
-    except Exception as e:
-        return jsonify({"status": "ERROR", "message": f"Database error: {e}"}), 500
-    finally:
-        conn.close()
 
-    return jsonify({"status": "SUCCESS", "message": "Data updated successfully"}), 200
+        cursor.execute(f'SELECT name, phone FROM "{table_name}" WHERE uid = %s', (uid,))
+        user = cursor.fetchone()
+        if user:
+            name, phone = user
+            send_whatsapp_message(name, value, date, phone)
+
+    except Exception as e:
+        conn.close()
+        return jsonify({"status": "ERROR", "message": f"Database error: {e}"}), 500
+
+    conn.close()
+    return jsonify({"status": "SUCCESS", "message": "Data updated and message sent"}), 200
+
+#--- SEND WHATSAPP MESSAGE (Twilio Sandbox) ---
+def send_whatsapp_message(name, value, date, phone):
+    # Twilio credentials from environment variables
+    account_sid = os.getenv("TWILIO_ACCOUNT_SID")
+    auth_token = os.getenv("TWILIO_AUTH_TOKEN")
+
+    # ✅ Twilio Sandbox number for WhatsApp (should not be changed)
+    from_whatsapp = os.getenv("TWILIO_FROM_WHATSAPP", "whatsapp:+14155238886")
+
+    # Format receiver's number properly
+    to_whatsapp = f"whatsapp:{phone}"
+
+    # Message content
+    message_body = f"Hi {name}, your purchase of ₹{value} on {date} has been recorded. Thank you!"
+
+    try:
+        client = Client(account_sid, auth_token)
+        message = client.messages.create(
+            from_=from_whatsapp,
+            body=message_body,
+            to=to_whatsapp
+        )
+        print("Message SID:", message.sid)
+    except Exception as e:
+        print("Failed to send WhatsApp message:", str(e))
+
+
 
 # --- VERIFY UID USING API KEY ---
 @app.route('/verify', methods=['POST'])
