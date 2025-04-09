@@ -5,3 +5,4 @@ flask-session
 twilio
 xlsxwriter
 gunicorn  # For deployment on Render
+json
