@@ -168,27 +168,25 @@ def send_whatsapp_message(name, value, date, phone):
     # Twilio credentials from environment variables
     account_sid = os.getenv("TWILIO_ACCOUNT_SID")
     auth_token = os.getenv("TWILIO_AUTH_TOKEN")
+    template_sid = os.getenv("TWILIO_TEMPLATE_SID", "HXc15f014762fe37860dd84e47f585e5c7")  # fallback template SID
 
-    # ✅ Twilio Sandbox number for WhatsApp (should not be changed)
+    # ✅ Twilio Sandbox number for WhatsApp
     from_whatsapp = os.getenv("TWILIO_FROM_WHATSAPP", "whatsapp:+14155238886")
 
     # Format receiver's number properly
     to_whatsapp = f"whatsapp:{phone}"
 
-    # Message content
-    message_body = f"Hi {name}, your purchase of ₹{value} on {date} has been recorded. Thank you!"
-
     try:
         client = Client(account_sid, auth_token)
         message = client.messages.create(
             from_=from_whatsapp,
-            body=message_body,
+            content_sid=template_sid,
+            content_variables=f'{{"1":"{name}", "2":"{date}", "3":"{value}"}}',
             to=to_whatsapp
         )
         print("Message SID:", message.sid)
     except Exception as e:
         print("Failed to send WhatsApp message:", str(e))
-
 
 
 # --- VERIFY UID USING API KEY ---
