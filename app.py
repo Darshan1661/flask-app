@@ -2,37 +2,34 @@ import os
 from flask import Flask, render_template, request, redirect, url_for, jsonify, send_file, session
 import psycopg2
 import pandas as pd
-import json
 from flask_session import Session
-from io import BytesIO  # For Excel export
-from twilio.rest import Client
+from io import BytesIO
+import requests
 
 app = Flask(__name__)
 
-# --- Flask Secret Key ---
+# --- Secret Key ---
 app.secret_key = os.getenv("FLASK_SECRET_KEY", "your_secret_key_here")
 
-# --- Configure Server-side Session ---
+# --- Session Config ---
 app.config["SESSION_TYPE"] = "filesystem"
 app.config["SESSION_PERMANENT"] = False
 app.config["SESSION_FILE_DIR"] = "./flask_sessions"
 Session(app)
 
-# --- Database Configuration ---
+# --- Database URL ---
 DATABASE_URL = os.getenv(
     "DATABASE_URL",
     "postgresql://mydb_bo4h_user:62G78IsSH8APj0GSXgDe8FvhGuTrHfY0@dpg-cvj8hlemcj7s73e9oni0-a.oregon-postgres.render.com/mydb_bo4h?sslmode=require"
 )
 
-# --- Connect to Database ---
 def connect_db():
     try:
         return psycopg2.connect(DATABASE_URL, sslmode="require")
-    except Exception as e:
-        print(f"Database connection failed: {e}")
+    except Exception:
         return None
 
-# --- EXPORT DATA TO EXCEL ---
+# --- Export to Excel ---
 @app.route("/export")
 def export_to_excel():
     if "table_name" not in session:
@@ -60,7 +57,7 @@ def export_to_excel():
     finally:
         conn.close()
 
-# --- LOGIN PAGE ---
+# --- Login ---
 @app.route("/", methods=["GET", "POST"])
 @app.route("/login", methods=["GET", "POST"])
 def login():
@@ -89,14 +86,14 @@ def login():
 
     return render_template("login.html")
 
-# --- HOME PAGE ---
+# --- Home ---
 @app.route("/home")
 def home():
     if "user" not in session:
         return redirect(url_for("login"))
     return render_template("home.html", username=session["user"])
 
-# --- DISPLAY TABLE PAGE ---
+# --- Table View ---
 @app.route("/table")
 def show_table():
     if "table_name" not in session:
@@ -118,7 +115,7 @@ def show_table():
     data = [dict(zip(column_names, row)) for row in rows]
     return render_template("table.html", rows=data)
 
-# --- UPDATE DATA USING API KEY ---
+# --- Update via API ---
 @app.route('/update', methods=['POST'])
 def update_data():
     api_key = request.headers.get("x-api-key")
@@ -135,7 +132,7 @@ def update_data():
 
     if not result:
         conn.close()
-        return jsonify({"status": "ERROR", "message": "Invalid API Key"}), 403
+        return jsonify({"status": "ERROR", "message": "Invalid Token"}), 403
 
     table_name = result[0]
     data = request.get_json()
@@ -164,40 +161,27 @@ def update_data():
     conn.close()
     return jsonify({"status": "SUCCESS", "message": "Data updated and message sent"}), 200
 
-#--- SEND WHATSAPP MESSAGE (Twilio Sandbox) ---
-def send_whatsapp_message(name, value, date, phone):
-    # Twilio credentials from environment variables
-    account_sid = os.getenv("TWILIO_ACCOUNT_SID")
-    auth_token = os.getenv("TWILIO_AUTH_TOKEN")
-    template_sid = os.getenv("TWILIO_TEMPLATE_SID")  # Use your actual template SID
+# --- WhatsApp via UltraMsg ---
+def send_whatsapp_message(name, amount, date, phone_number):
+    url = "https://api.ultramsg.com/instance114080/messages/chat"
+    token = "jnuqsbvmoqiel3pd"  # replace with actual token
 
-    # Twilio sandbox number (unchanged)
-    from_whatsapp = os.getenv("TWILIO_FROM_WHATSAPP", "whatsapp:+14155238886")
-    to_whatsapp = f"whatsapp:{phone}"
+    message = f"AMRUIT DARI\nname: {name}\namount: ₹{amount}\ndate: {date}"
 
-    # Create the Twilio client
-    client = Client(account_sid, auth_token)
+    payload = {
+        "token": token,
+        "to": phone_number,
+        "body": message,
+        "priority": 10
+    }
 
-    try:
-        # Send template message
-        message = client.messages.create(
-            from_=from_whatsapp,
-            to=to_whatsapp,
-            content_sid=template_sid,
-            content_variables=json.dumps({
-                "1": name,
-                "2": date,
-                "3": f"₹{value}"
-            })
-        )
-        print("Message sent successfully. SID:", message.sid)
+    headers = {
+        "content-type": "application/x-www-form-urlencoded"
+    }
 
-    except Exception as e:
-        print("Failed to send WhatsApp message:", str(e))
+    requests.post(url, data=payload, headers=headers)
 
-
-
-# --- VERIFY UID USING API KEY ---
+# --- UID Verification ---
 @app.route('/verify', methods=['POST'])
 def verify_uid():
     api_key = request.headers.get("x-api-key")
@@ -231,17 +215,10 @@ def verify_uid():
         conn.close()
 
     if user:
-        return jsonify({"status": "VERIFIED", "UID": uid, "name": user[0]}), 200
+        return jsonify({"status": "VERIFIED", "name": user[0]})
     else:
         return jsonify({"status": "NOT_FOUND", "message": "UID not found"}), 404
 
-# --- LOGOUT FUNCTION ---
-@app.route("/logout")
-def logout():
-    session.clear()
-    return redirect(url_for("login"))
-
-# --- RUN FLASK APP ---
+# --- Run App ---
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port)
+    app.run()

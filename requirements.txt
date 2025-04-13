@@ -2,6 +2,6 @@ Flask
 psycopg2-binary
 pandas
 flask-session
-twilio
 xlsxwriter
 gunicorn  # For deployment on Render
+requests
