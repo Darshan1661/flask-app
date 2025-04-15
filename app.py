@@ -140,9 +140,11 @@ def update_data():
     
     # Get data from request JSON
     data = request.get_json()
+    data = request.get_json()
     if not data or "UID" not in data or "item_name" not in data or "amount" not in data or "date" not in data:
         conn.close()
         return jsonify({"status": "ERROR", "message": "Invalid request data"}), 400
+
 
     uid = data["UID"]
     item_name = data["item_name"]
