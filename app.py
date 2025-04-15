@@ -219,6 +219,12 @@ def verify_uid():
     else:
         return jsonify({"status": "NOT_FOUND", "message": "UID not found"}), 404
 
+# --- Logout ---
+@app.route('/logout')
+def logout():
+    session.pop('user', None)
+    return redirect(url_for('login'))
+
 # --- Run App ---
 if __name__ == "__main__":
     app.run()
