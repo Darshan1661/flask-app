@@ -115,6 +115,7 @@ def show_table():
     data = [dict(zip(column_names, row)) for row in rows]
     return render_template("table.html", rows=data)
 
+
 # --- Update via API ---
 @app.route('/update', methods=['POST'])
 def update_data():
@@ -122,6 +123,7 @@ def update_data():
     if not api_key:
         return jsonify({"status": "ERROR", "message": "API key missing"}), 401
 
+    # Connect to the database
     conn = connect_db()
     if conn is None:
         return jsonify({"status": "ERROR", "message": "Database connection error"}), 500
@@ -135,39 +137,47 @@ def update_data():
         return jsonify({"status": "ERROR", "message": "Invalid Token"}), 403
 
     table_name = result[0]
+    
+    # Get data from request JSON
     data = request.get_json()
-    if not data or "UID" not in data or "date" not in data or "value" not in data:
+    if not data or "UID" not in data or "item_name" not in data or "amount" not in data or "date" not in data:
         conn.close()
         return jsonify({"status": "ERROR", "message": "Invalid request data"}), 400
 
     uid = data["UID"]
+    item_name = data["item_name"]
+    amount = data["amount"]
     date = data["date"]
-    value = data["value"]
 
     try:
-        cursor.execute(f'UPDATE "{table_name}" SET "{date}" = %s WHERE uid = %s', (value, uid))
-        conn.commit()
-
+        # Retrieve the customer's name and phone number from the database
         cursor.execute(f'SELECT name, phone FROM "{table_name}" WHERE uid = %s', (uid,))
         user = cursor.fetchone()
+        
         if user:
             name, phone = user
-            send_whatsapp_message(name, value, date, phone)
+            # Send WhatsApp message
+            send_whatsapp_message(name, item_name, amount, date, phone)
+        else:
+            return jsonify({"status": "ERROR", "message": "User not found"}), 404
 
     except Exception as e:
         conn.close()
         return jsonify({"status": "ERROR", "message": f"Database error: {e}"}), 500
 
     conn.close()
-    return jsonify({"status": "SUCCESS", "message": "Data updated and message sent"}), 200
+    return jsonify({"status": "SUCCESS", "message": "Message sent successfully"}), 200
+
 
 # --- WhatsApp via UltraMsg ---
-def send_whatsapp_message(name, amount, date, phone_number):
+def send_whatsapp_message(name, item_name, amount, date, phone_number): 
     url = "https://api.ultramsg.com/instance114080/messages/chat"
-    token = "jnuqsbvmoqiel3pd"  # replace with actual token
+    token = "jnuqsbvmoqiel3pd"  # Replace with actual token
 
-    message = f"AMRUIT DARI\nname: {name}\namount: ₹{amount}\ndate: {date}"
+    # Construct message
+    message = f"AMRUIT DARI\nname: {name}\nitem: {item_name}\namount: ₹{amount}\ndate: {date}"
 
+    # Create payload
     payload = {
         "token": token,
         "to": phone_number,
@@ -179,7 +189,17 @@ def send_whatsapp_message(name, amount, date, phone_number):
         "content-type": "application/x-www-form-urlencoded"
     }
 
+    # Send WhatsApp message
+    response = requests.post(url, data=payload, headers=headers)
+    
+    # Optional: Handle response from WhatsApp API
+    if response.status_code != 200:
+        print(f"Error sending message: {response.text}")
+
+
+    # Send WhatsApp message
     requests.post(url, data=payload, headers=headers)
+
 
 # --- UID Verification ---
 @app.route('/verify', methods=['POST'])
