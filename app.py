@@ -20,13 +20,14 @@ Session(app)
 # --- Database URL ---
 DATABASE_URL = os.getenv(
     "DATABASE_URL",
-    "postgresql://postgres:PmGRHbsCwcwkmHkZNOvxcGPyxCSOsUcU@mainline.proxy.rlwy.net:41529/railway"
+    "postgresql://postgres:PmGRHbsCwcwkmHkZNOvxcGPyxCSOsUcU@mainline.proxy.rlwy.net:41529/postgres"
 )
 
 def connect_db():
     try:
-        return psycopg2.connect(DATABASE_URL, sslmode="require")
-    except Exception:
+        return psycopg2.connect(DATABASE_URL)
+    except Exception as e:
+        print(f"Database connection failed: {e}")
         return None
 
 # --- Export to Excel ---
@@ -129,7 +130,7 @@ def update_data():
         return jsonify({"status": "ERROR", "message": "Database connection error"}), 500
 
     cursor = conn.cursor()
-    cursor.execute("SELECT table_name FROM customers WHERE api_key = %s", (api_key,))
+    cursor.execute("SELECT table_name FROM customer WHERE api_key = %s", (api_key,))
     result = cursor.fetchone()
 
     if not result:
@@ -139,7 +140,6 @@ def update_data():
     table_name = result[0]
     
     # Get data from request JSON
-    data = request.get_json()
     data = request.get_json()
     if not data or "UID" not in data or "item_name" not in data or "amount" not in data or "date" not in data:
         conn.close()
@@ -199,9 +199,6 @@ def send_whatsapp_message(name, item_name, amount, date, phone_number):
         print(f"Error sending message: {response.text}")
 
 
-    # Send WhatsApp message
-    requests.post(url, data=payload, headers=headers)
-
 
 # --- UID Verification ---
 @app.route('/verify', methods=['POST'])
@@ -222,7 +219,7 @@ def verify_uid():
 
     try:
         cursor = conn.cursor()
-        cursor.execute("SELECT table_name FROM customers WHERE api_key = %s", (api_key,))
+        cursor.execute("SELECT table_name FROM customer WHERE api_key = %s", (api_key,))
         result = cursor.fetchone()
 
         if not result:
@@ -244,8 +241,9 @@ def verify_uid():
 # --- Logout ---
 @app.route('/logout')
 def logout():
-    session.pop('user', None)
+    session.clear()  # Clears all session keys safely
     return redirect(url_for('login'))
+
 
 # --- Run App ---
 if __name__ == "__main__":
