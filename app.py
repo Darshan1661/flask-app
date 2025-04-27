@@ -20,7 +20,7 @@ Session(app)
 # --- Database URL ---
 DATABASE_URL = os.getenv(
     "DATABASE_URL",
-    "postgresql://mydb_bo4h_user:62G78IsSH8APj0GSXgDe8FvhGuTrHfY0@dpg-cvj8hlemcj7s73e9oni0-a.oregon-postgres.render.com/mydb_bo4h?sslmode=require"
+    "postgresql://postgres:PmGRHbsCwcwkmHkZNOvxcGPyxCSOsUcU@mainline.proxy.rlwy.net:41529/railway"
 )
 
 def connect_db():
@@ -71,7 +71,7 @@ def login():
 
         try:
             with conn.cursor() as cursor:
-                cursor.execute("SELECT password, table_name, api_key FROM customers WHERE username = %s", (username,))
+                cursor.execute("SELECT password, table_name, api_key FROM customer WHERE username = %s", (username,))
                 result = cursor.fetchone()
 
                 if result and result[0] == password:
