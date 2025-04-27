@@ -145,7 +145,6 @@ def update_data():
         conn.close()
         return jsonify({"status": "ERROR", "message": "Invalid request data"}), 400
 
-
     uid = data["UID"]
     item_name = data["item_name"]
     amount = data["amount"]
@@ -158,6 +157,15 @@ def update_data():
         
         if user:
             name, phone = user
+            
+            # Update the purchase amount in the table based on UID and date
+            cursor.execute(f'''
+                UPDATE "{table_name}"
+                SET amount = %s, date_column = %s
+                WHERE uid = %s
+            ''', (amount, date, uid))
+            conn.commit()  # Make sure to commit changes to the database
+
             # Send WhatsApp message
             send_whatsapp_message(name, item_name, amount, date, phone)
         else:
@@ -169,6 +177,7 @@ def update_data():
 
     conn.close()
     return jsonify({"status": "SUCCESS", "message": "Message sent successfully"}), 200
+
 
 
 # --- WhatsApp via UltraMsg ---
