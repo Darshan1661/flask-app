@@ -138,7 +138,7 @@ def update_data():
         return jsonify({"status": "ERROR", "message": "Invalid Token"}), 403
 
     table_name = result[0]
-    
+
     # Get data from request JSON
     data = request.get_json()
     if not data or "UID" not in data or "item_name" not in data or "amount" not in data or "date" not in data:
@@ -148,7 +148,7 @@ def update_data():
     uid = data["UID"]
     item_name = data["item_name"]
     amount = data["amount"]
-    date = data["date"]
+    date_column = data["date"]  # this is column name now
 
     try:
         # Retrieve the customer's name and phone number from the database
@@ -157,17 +157,17 @@ def update_data():
         
         if user:
             name, phone = user
-            
-            # Update the purchase amount in the table based on UID and date
+
+            # Now update the correct date column with the amount
             cursor.execute(f'''
                 UPDATE "{table_name}"
-                SET amount = %s, date_column = %s
+                SET "{date_column}" = %s
                 WHERE uid = %s
-            ''', (amount, date, uid))
-            conn.commit()  # Make sure to commit changes to the database
+            ''', (amount, uid))
+            conn.commit()
 
             # Send WhatsApp message
-            send_whatsapp_message(name, item_name, amount, date, phone)
+            send_whatsapp_message(name, item_name, amount, date_column, phone)
         else:
             return jsonify({"status": "ERROR", "message": "User not found"}), 404
 
@@ -178,12 +178,18 @@ def update_data():
     conn.close()
     return jsonify({"status": "SUCCESS", "message": "Message sent successfully"}), 200
 
-
-
 # --- WhatsApp via UltraMsg ---
 def send_whatsapp_message(name, item_name, amount, date, phone_number): 
     url = "https://api.ultramsg.com/instance114080/messages/chat"
     token = "jnuqsbvmoqiel3pd"  # Replace with actual token
+
+    # --- Fix phone number ---
+    phone_number = phone_number.strip()
+    if not phone_number.startswith("+91"):
+        if phone_number.startswith("0"):
+            phone_number = "+91" + phone_number[1:]
+        else:
+            phone_number = "+91" + phone_number
 
     # Construct message
     message = f"AMRUIT DARI\nname: {name}\nitem: {item_name}\namount: ₹{amount}\ndate: {date}"
@@ -203,9 +209,11 @@ def send_whatsapp_message(name, item_name, amount, date, phone_number):
     # Send WhatsApp message
     response = requests.post(url, data=payload, headers=headers)
     
-    # Optional: Handle response from WhatsApp API
+    # Handle response
     if response.status_code != 200:
-        print(f"Error sending message: {response.text}")
+        print(f"Error sending message: {response.status_code} - {response.text}")
+    else:
+        print(f"WhatsApp message sent successfully to {phone_number}")
 
 
 
